@@ -255,13 +255,22 @@ class BAResNext(nn.Layer):
 
         prior = 0.01
 
+        self.classificationModel.output.weight.data.stop_gradient = True
         self.classificationModel.output.weight.data.fill_(value=0)
+
+        self.classificationModel.output.bias.data.stop_gradient = True
         self.classificationModel.output.bias.data.fill_(value=-math.log((1.0 - prior) / prior))
 
+        self.reidModel.output.weight.data.stop_gradient = True
         self.reidModel.output.weight.data.fill_(value=0)
+
+        self.reidModel.output.bias.data.stop_gradient = True
         self.reidModel.output.bias.data.fill_(value=-math.log((1.0 - prior) / prior))
 
+        self.regressionModel.output.weight.data.stop_gradient = True
         self.regressionModel.output.weight.data.fill_(value=0)
+
+        self.regressionModel.output.bias.data.stop_gradient = True
         self.regressionModel.output.bias.data.fill_(value=0)
 
         self.freeze_bn()
@@ -292,7 +301,7 @@ class BAResNext(nn.Layer):
         return nn.Sequential(*layers)
 
     def freeze_bn(self):
-        for layer in self.modules():
+        for layer in self.sublayers():
             if isinstance(layer, nn.BatchNorm2D):
                 layer.eval()
 
@@ -416,7 +425,7 @@ def resnext50_32x4d(num_classes, pretrained=False, **kwargs):
     model = BAResNext(num_classes, utils.Bottleneck, [3, 4, 6, 3], **kwargs)
     if pretrained:
         checkpoint = paddle.load('../pth/resnext50_32x4d-7cdf4587.pth')
-        model.load_state_dict(checkpoint, strict=False)
+        model.set_state_dict(checkpoint, use_structured_name=False)
         print(model)
 
     return model
