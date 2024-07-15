@@ -50,7 +50,7 @@ class MultiSpectralAttentionLayer(nn.Layer):
         self.dct_layer = MultiSpectralDCTLayer(dct_h, dct_w, mapper_x, mapper_y, channel)
 
     def forward(self, x):
-        n, c, h, w = x.shape
+        n, c, h, w = tuple(x.shape)
         x_pooled = x
         if h != self.dct_h or w != self.dct_w:
             x_pooled = nn.functional.adaptive_avg_pool2d(x, (self.dct_h, self.dct_w))
@@ -73,14 +73,14 @@ class MultiSpectralDCTLayer(nn.Layer):
 
         self.num_freq = len(mapper_x)
 
-        self.register_buffer('weight', self.get_dct_filter(height, width, mapper_x, mapper_y, channel))
+        self.register_buffer(name='weight', tensor=self.get_dct_filter(height, width, mapper_x, mapper_y, channel))
 
     def forward(self, x):
         assert len(x.shape) == 4, 'x must been 4 dimensions, but got ' + str(len(x.shape))
 
         x = x * self.weight
 
-        result = paddle.sum(x, keepdim=[2, 3])
+        result = paddle.sum(x=x, axis=[2, 3])
         return result
 
     def build_filter(self, pos, freq, POS):
@@ -91,7 +91,7 @@ class MultiSpectralDCTLayer(nn.Layer):
             return result * math.sqrt(2)
 
     def get_dct_filter(self, tile_size_x, tile_size_y, mapper_x, mapper_y, channel):
-        dct_filter = paddle.zeros(channel, tile_size_x, tile_size_y)
+        dct_filter = paddle.zeros(shape=[channel, tile_size_x, tile_size_y])
 
         c_part = channel // len(mapper_x)
 

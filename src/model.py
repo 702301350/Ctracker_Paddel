@@ -220,7 +220,7 @@ class BAResNext(nn.Layer):
         if block == utils.BasicBlock:
             fpn_sizes = [self.layer2[layers[1] - 1].conv2.out_channels, self.layer3[layers[2] - 1].conv2.out_channels,
                          self.layer4[layers[3] - 1].conv2.out_channels]
-        elif block == utils.Bottleneck:
+        elif block == utils:.Bottleneck:
             fpn_sizes = [self.layer2[layers[1] - 1].conv3.out_channels, self.layer3[layers[2] - 1].conv3.out_channels,
                          self.layer4[layers[3] - 1].conv3.out_channels]
 
@@ -276,7 +276,7 @@ class BAResNext(nn.Layer):
 
         if stride != 1 or self.inplanes != planes * block.expansion:
             downsample = nn.Sequential(
-                nn.Conv2D(self.inplanes, planes * block.expansion,
+                nn.Conv2D(in_channels=self.inplanes, out_channels=planes * block.expansion,
                           kernel_size=1, stride=stride, bias_attr=False),
                 norm_layer(planes * block.expansion),
             )
