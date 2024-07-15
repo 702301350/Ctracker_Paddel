@@ -330,14 +330,14 @@ class BAResNext(nn.Layer):
             for ind, feature in enumerate(track_features):
                 reid_mask = self.reidModel(feature)
 
-                reid_feat = reid_mask.permute(0, 2, 3, 1)
-                batch_size, width, height, _ = reid_feat.shape
-                reid_feat = reid_feat.contiguous().view(batch_size, -1, self.num_classes)
+                reid_feat = reid_mask.permute(perm=[0, 2, 3, 1])
+                batch_size, width, height, _ = tuple(reid_feat.shape)
+                reid_feat = reid_feat.view(batch_size, -1, self.num_classes)
 
                 cls_mask = self.classificationModel(feature)
 
-                cls_feat = cls_mask.permute(0, 2, 3, 1)
-                cls_feat = cls_feat.contiguous().view(batch_size, -1, self.num_classes)
+                cls_feat = cls_mask.permute(prem=[0, 2, 3, 1])
+                cls_feat = cls_feat.view(batch_size, -1, self.num_classes)
 
                 reg_in = feature * reid_mask * cls_mask
 
@@ -356,7 +356,7 @@ class BAResNext(nn.Layer):
 
         else:
             if last_feat is None:
-                return paddle.zeros(0), paddle.zeros(0, 4), features
+                return paddle.zeros(0), paddle.zeros(shape=[0, 4]), features
             track_features = []
             for ind, featmap in enumerate(features):
                 track_features.append(paddle.concat((last_feat[ind], featmap), axis=1))
@@ -367,14 +367,14 @@ class BAResNext(nn.Layer):
             for ind, feature in enumerate(track_features):
                 reid_mask = self.reidModel(feature)
 
-                reid_feat = reid_mask.permute(0, 2, 3, 1)
-                batch_size, width, height, _ = reid_feat.shape
-                reid_feat = reid_feat.contiguous().view(batch_size, -1, self.num_classes)
+                reid_feat = reid_mask.permute(perm=[0, 2, 3, 1])
+                batch_size, width, height, _ = tuple(reid_feat.shape)
+                reid_feat = reid_feat.view(batch_size, -1, self.num_classes)
 
                 cls_mask = self.classificationModel(feature)
 
-                cls_feat = cls_mask.permute(0, 2, 3, 1)
-                cls_feat = cls_feat.contiguous().view(batch_size, -1, self.num_classes)
+                cls_feat = cls_mask.permute(perm=[0, 2, 3, 1])
+                cls_feat = cls_feat.view(batch_size, -1, self.num_classes)
 
                 reg_in = feature * reid_mask * cls_mask
 
@@ -383,13 +383,13 @@ class BAResNext(nn.Layer):
                 reg_features.append(reg_feat)
                 cls_features.append(cls_feat)
                 reid_features.append(reid_feat)
-            regression = paddle.concat(reg_features, axis=1)
+            regression = paddle.concat(x=reg_features, axis=1)
 
-            classification = paddle.concat(cls_features, axis=1)
+            classification = paddle.concat(x=cls_features, axis=1)
 
-            reid_score = paddle.concat(reid_features, axis=1)
+            reid_score = paddle.concat(x=reid_features, axis=1)
 
-            anchors = paddle.concat((anchors, anchors), axis=2)
+            anchors = paddle.concat(x=(anchors, anchors), axis=2)
 
             transformed_anchors = self.regressBoxes(anchors, regression)
 
@@ -399,7 +399,7 @@ class BAResNext(nn.Layer):
 
             if scores_over_thresh.sum() == 0:
                 # no boxes to NMS, just return
-                return paddle.zeros(0), paddle.zeros(0, 4), features
+                return paddle.zeros(shape=[0]), paddle.zeros(shape=[0, 4]), features
 
             classification = classification[:, scores_over_thresh, :]
             transformed_anchors = transformed_anchors[:, scores_over_thresh, :]
