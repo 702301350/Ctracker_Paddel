@@ -5,8 +5,8 @@ import os
 import cv2
 import numpy as np
 import skimage
-import skimage.colort
-import skimage.iot
+import skimage.color
+import skimage.io
 import skimage.transform
 import paddle
 from scipy.optimize import linear_sum_assignment
