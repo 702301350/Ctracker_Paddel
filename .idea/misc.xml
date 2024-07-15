@@ -3,7 +3,7 @@
   <component name="Black">
     <option name="sdkName" value="$USER_HOME$/app/anaconda3/envs/paddle" />
   </component>
-  <component name="ProjectRootManager" version="2" project-jdk-name="$USER_HOME$/.app/anaconda3/envs/ctracker_paddle (2)" project-jdk-type="Python SDK" />
+  <component name="ProjectRootManager" version="2" project-jdk-name="$USER_HOME$/app/anaconda3/envs/paddle" project-jdk-type="Python SDK" />
   <component name="PyPackaging">
     <option name="earlyReleasesAsUpgrades" value="true" />
   </component>

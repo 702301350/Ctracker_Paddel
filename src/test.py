@@ -5,15 +5,15 @@ import os
 import cv2
 import numpy as np
 import skimage
-import skimage.color
-import skimage.io
+import skimage.colort
+import skimage.iot
 import skimage.transform
-import torch
+import paddle
 from scipy.optimize import linear_sum_assignment
 
 from dataloader import RGB_MEAN, RGB_STD
 
-print('CUDA available: {}'.format(torch.cuda.is_available()))
+print('CUDA available: {}'.format(paddle.device.cuda.device_count()))
 
 color_list = [(0, 0, 255), (255, 0, 0), (0, 255, 0), (255, 0, 255), (0, 255, 255), (255, 255, 0), (128, 0, 255),
               (0, 128, 255), (128, 255, 0), (0, 255, 128), (255, 128, 0), (255, 0, 128), (128, 128, 255),
@@ -166,7 +166,7 @@ def run_each_dataset(model_dir, retinanet, dataset_path, subset, cur_dataset):
     for idx in range(img_len + 1):
         i = idx - 1
         print('tracking: ', i)
-        with torch.no_grad():
+        with paddle.no_grad():
             data_path1 = img_list[min(idx, img_len - 1)]
             img_origin1 = skimage.io.imread(data_path1)  # 读取图片
             img_h, img_w, _ = img_origin1.shape
@@ -177,7 +177,7 @@ def run_each_dataset(model_dir, retinanet, dataset_path, subset, cur_dataset):
             img1[:img_h, :img_w, :] = img_origin1
             img1 = (img1.astype(np.float32) / 255.0 - np.array([[RGB_MEAN]])) / np.array(
                 [[RGB_STD]])  # astype:对数据类型进行转换，除以255就是归一化
-            img1 = torch.from_numpy(img1).permute(2, 0, 1).view(1, 3, resize_h, resize_w)  # [1，3，1088,1920]
+            img1 = paddle.from_numpy(img1).permute(2, 0, 1).view(1, 3, resize_h, resize_w)  # [1，3，1088,1920]
             # scores:前景的置信度得分,transformed_anchors:经过soft-nms后的pred_boxes， last_feat：5个特征级上的特征
             scores, transformed_anchors, last_feat = retinanet(img1.cuda().float(), last_feat=last_feat)  # 执行检测过程(重要)
             if idx > 0:
@@ -299,7 +299,7 @@ def run_each_dataset(model_dir, retinanet, dataset_path, subset, cur_dataset):
 def run_from_train(model_dir, root_path):
     if not os.path.exists(os.path.join(model_dir, 'results')):
         os.makedirs(os.path.join(model_dir, 'results'))
-    retinanet = torch.load(os.path.join(model_dir, 'model_final.pt'))
+    retinanet = paddle.load(os.path.join(model_dir, 'model_final.pt'))
 
     use_gpu = True
 
@@ -327,7 +327,7 @@ def main(args=None):
     if not os.path.exists(os.path.join(parser.model_dir, 'results')):  # 创建results/文件夹路径
         os.makedirs(os.path.join(parser.model_dir, 'results'))
 
-    retinanet = torch.load(os.path.join(parser.model_dir, 'model_final.pt'))
+    retinanet = (paddle.load(os.path.join(parser.model_dir, 'model_final.pt')))
 
     use_gpu = True
 
