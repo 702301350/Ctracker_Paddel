@@ -239,7 +239,7 @@ class BAResNext(nn.Layer):
         self.focalLoss = losses.FocalLoss()
         self.reidfocalLoss = losses.FocalLossReid()
 
-        for m in self.modules():
+        for m in self.sublayers():
             if isinstance(m, nn.Conv2D):
                 nn.initializer.KaimingNormal(fan_in=None)(m.weight)
             elif isinstance(m, (nn.BatchNorm2D, nn.GroupNorm)):
