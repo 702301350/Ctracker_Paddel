@@ -31,7 +31,9 @@ class BA_module_resnet(nn.Layer):
         )
 
     def forward(self, pre_layers, cur_layer):
-        b, cur_c, _, _ = cur_layer.size()
+        tuple_tmp = cur_layer.shape
+        b = paddle.to_tensor(tuple_tmp[0], dtype='int32')
+        cur_c = paddle.to_tensor(tuple_tmp[1], dtype='int32')
 
         pre_fusions = [self.pre_fusions[i](pre_layers[i].view(b, -1)) for i in range(len(pre_layers))]
         cur_fusion = self.cur_fusion(cur_layer.view(b, -1))

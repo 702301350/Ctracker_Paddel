@@ -1,8 +1,6 @@
 import math
 import paddle
 
-from paddle import nn
-
 def get_freq_indices(method):
     assert method in ['top1', 'top2', 'top4', 'top8', 'top16', 'top32',
                       'bot1', 'bot2', 'bot4', 'bot8', 'bot16', 'bot32', 'low1', 'low2',
@@ -54,7 +52,7 @@ class MultiSpectralAttentionLayer(paddle.nn.Layer):
         if h != self.dct_h or w != self.dct_w:
             x_pooled = paddle.nn.functional.adaptive_avg_pool2d(x=x, output_size=(self.dct_h, self.dct_w))
 
-        DCT_features = self.dct_layer(x_pooled).view(n, c, 1, 1)
+        DCT_features = self.dct_layer(x_pooled).view([n, c, 1, 1])
         return DCT_features
 
 
