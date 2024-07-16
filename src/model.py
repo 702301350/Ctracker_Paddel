@@ -210,12 +210,12 @@ class BAResNext(nn.Layer):
         self.maxpool = nn.MaxPool2D(kernel_size=3, stride=2, padding=1)
 
         self.layer1 = self._make_layer(block, 64, layers[0], groups)
-        self.layer2 = self._make_layer(block, 128, layers[1], groups, stride=2,
-                                       dilate=replace_stride_with_dilation[0])
-        self.layer3 = self._make_layer(block, 256, layers[2], groups, stride=2,
-                                       dilate=replace_stride_with_dilation[1])
-        self.layer4 = self._make_layer(block, 512, layers[3], groups, stride=2,
-                                       dilate=replace_stride_with_dilation[2])
+
+        self.layer2 = self._make_layer(block, 128, layers[1], groups, stride=2, dilate=replace_stride_with_dilation[0])
+
+        self.layer3 = self._make_layer(block, 256, layers[2], groups, stride=2, dilate=replace_stride_with_dilation[1])
+
+        self.layer4 = self._make_layer(block, 512, layers[3], groups, stride=2, dilate=replace_stride_with_dilation[2])
 
         if block == utils.BasicBlock:
             fpn_sizes = [self.layer2[layers[1] - 1].conv2.weight.shape[0], self.layer3[layers[2] - 1].conv2.weight.shape[0],

@@ -109,6 +109,26 @@ class Bottleneck(nn.Layer):
                                                                               reduction=reduction,
                                                                               freq_sel_method='top16')
 
+    def forward(self, x):
+        residual = x
+        out = self.conv1(x)
+        out = self.bn1(out)
+        out = self.relu(out)
+        F1 = self.feature_extraction1(out)
+        out = self.conv2(out)
+        out = self.bn2(out)
+        out = self.relu(out)
+        F2 = self.feature_extraction2(out)
+        out = self.conv3(out)
+        out = self.bn3(out)
+        F3 = self.feature_extraction3(out)
+        att = self.ba([F1, F2], F3)
+        out = out * att
+        if self.downsample is not None:
+            residual = self.downsample(x)
+        out += residual
+        out = self.relu(out)
+        return out
 
 class BBoxTransform(nn.Layer):
     def __init__(self, mean=None, std=None):

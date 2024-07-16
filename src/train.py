@@ -84,8 +84,8 @@ def main(args=None):
 
     retinanet = paddle.DataParallel(retinanet).to()
 
-    print('Number of models parameters: {}'.format(
-        sum([p.data.size() for p in retinanet.parameters()])))
+    # print('Number of models parameters: {}'.format(
+    #    sum([p.data.size() for p in retinanet.parameters()])))
 
     retinanet.training = True
 
