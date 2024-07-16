@@ -285,8 +285,7 @@ class BAResNext(nn.Layer):
 
         if stride != 1 or self.inplanes != planes * block.expansion:
             downsample = nn.Sequential(
-                nn.Conv2D(in_channels=self.inplanes, out_channels=planes * block.expansion,
-                          kernel_size=1, stride=stride, bias_attr=False),
+                nn.Conv2D(in_channels=self.inplanes, out_channels=planes * block.expansion, kernel_size=1, stride=stride, bias_attr=False),
                 norm_layer(planes * block.expansion),
             )
 
