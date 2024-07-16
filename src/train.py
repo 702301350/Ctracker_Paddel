@@ -80,16 +80,16 @@ def main(args=None):
     use_gpu = True
 
     if use_gpu:
-        retinanet = retinanet.cuda()
+        retinanet = retinanet.to()
 
-    retinanet = paddle.DataParallel(retinanet).cuda()
+    retinanet = paddle.DataParallel(retinanet).to()
 
     print('Number of models parameters: {}'.format(
-        sum([p.data.nelement() for p in retinanet.parameters()])))
+        sum([p.data.size() for p in retinanet.parameters()])))
 
     retinanet.training = True
 
-    optimizer = optim.Adam(retinanet.parameters(), learning_rate=5e-5)
+    optimizer = optim.Adam(parameters=retinanet.parameters(), learning_rate=5e-5)
 
     scheduler = optim.lr.ReduceOnPlateau(optimizer.get_lr(), patience=3, verbose=True)
 
@@ -97,14 +97,14 @@ def main(args=None):
         maxlen=500)
 
     retinanet.train()
-    retinanet.module.freeze_bn()
+    retinanet._layers.freeze_bn()
 
     print('Num training images: {}'.format(len(dataset_train)))
     total_iter = 0
     for epoch_num in range(parser.epochs):
 
         retinanet.train()
-        retinanet.module.freeze_bn()
+        retinanet._layers.freeze_bn()
 
         epoch_loss = []
 
@@ -113,7 +113,7 @@ def main(args=None):
                 total_iter = total_iter + 1
                 optimizer.clear_gradients()
 
-                (classification_loss, regression_loss), reid_loss = retinanet([data['img'].cuda().float(), data['annot'], data['img_next'].cuda().float(), data['annot_next']])
+                (classification_loss, regression_loss), reid_loss = retinanet([data['img'].cuda().astype(dtype='float32'), data['annot'], data['img_next'].cuda().astype(dtype='float32'), data['annot_next']])
 
                 classification_loss = classification_loss.mean()
                 regression_loss = regression_loss.mean()
