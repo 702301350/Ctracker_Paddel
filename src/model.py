@@ -424,7 +424,7 @@ class BAResNext(nn.Layer):
 def resnext50_32x4d(num_classes, pretrained=False, **kwargs):
     model = BAResNext(num_classes, utils.Bottleneck, [3, 4, 6, 3], **kwargs)
     if pretrained:
-        checkpoint = paddle.load('../pth/resnext50_32x4d-7cdf4587.pth')
+        checkpoint = paddle.load('../pth/model.pdparams')
         model.set_state_dict(checkpoint, use_structured_name=False)
         print(model)
 
