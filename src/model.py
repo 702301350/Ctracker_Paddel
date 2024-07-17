@@ -18,11 +18,11 @@ class PyramidFeatures(nn.Layer):
         super(PyramidFeatures, self).__init__()
 
         self.P5_1 = nn.Conv2D(C5_size, feature_size, kernel_size=1, stride=1, padding=0)
-        self.P5_unsampled = nn.Upsample(scale_factor=2, mode='nearest')
+        self.P5_upsampled = nn.Upsample(scale_factor=2, mode='nearest')
         self.P5_2 = nn.Conv2D(feature_size, feature_size, kernel_size=3, stride=1, padding=1)
 
         self.P4_1 = nn.Conv2D(C4_size, feature_size, kernel_size=1, stride=1, padding=0)
-        self.P4_unsampled = nn.Upsample(scale_factor=2, mode='nearest')
+        self.P4_upsampled = nn.Upsample(scale_factor=2, mode='nearest')
         self.P4_2 = nn.Conv2D(feature_size, feature_size, kernel_size=3, stride=1, padding=1)
 
         self.P3_1 = nn.Conv2D(C3_size, feature_size, kernel_size=1, stride=1, padding=0)
@@ -73,6 +73,7 @@ class RegressionModel(nn.Layer):
 
         self.conv4 = nn.Conv2D(num_features_in, features_size, kernel_size=3, padding=1)
         self.act4 = nn.ReLU()
+
         self.output = nn.Conv2D(features_size, num_anchors * 8, kernel_size=3, padding=1)
 
     def forward(self, x):
@@ -90,14 +91,14 @@ class RegressionModel(nn.Layer):
 
         out = self.output(out)
 
-        out = out.permute(0, 2, 3, 1)
+        out = out.transpose(0, 2, 3, 1)
 
-        return out.contiguous().view(out.shape[0], -1, 8)
+        return out.contiguous().reshape([out.shape[0], -1, 8])
 
 
 # 目标分类分支(Object Classification branch)：使用4个连续的3*3卷积和relu激活层交错进行特征学习，最后使用一个3*3的卷积加sigmoid激活函数预测置信度
 class ClassificationModel(nn.Layer):
-    def __init__(self, num_features_in, num_anchors=1, num_classes=80, prior=0.01, feature_size=256):
+    def __init__(self, num_features_in, num_anchors=1, num_classes=80, prior=0.01, feature_size=512): # bbsp: 256
         super(ClassificationModel, self).__init__()
 
         self.num_classes = num_classes
@@ -228,8 +229,7 @@ class BAResNext(nn.Layer):
         self.num_classes = num_classes
 
         self.regressionModel = RegressionModel(512)
-        self.classificationModel = ClassificationModel(512,
-                                                       num_classes=num_classes)
+        self.classificationModel = ClassificationModel(512, num_classes=num_classes)
         self.reidModel = ReidModel(512, num_classes=num_classes)
 
         self.anchors = anchors.Anchors()
@@ -338,14 +338,14 @@ class BAResNext(nn.Layer):
             for ind, feature in enumerate(track_features):
                 reid_mask = self.reidModel(feature)
 
-                reid_feat = reid_mask.permute(perm=[0, 2, 3, 1])
+                reid_feat = reid_mask.transpose(perm=[0, 2, 3, 1])
                 batch_size, width, height, _ = tuple(reid_feat.shape)
-                reid_feat = reid_feat.view(batch_size, -1, self.num_classes)
+                reid_feat = reid_feat.reshape([batch_size, -1, self.num_classes])
 
                 cls_mask = self.classificationModel(feature)
 
-                cls_feat = cls_mask.permute(prem=[0, 2, 3, 1])
-                cls_feat = cls_feat.view(batch_size, -1, self.num_classes)
+                cls_feat = cls_mask.transpose(perm=[0, 2, 3, 1])
+                cls_feat = cls_feat.reshape([batch_size, -1, self.num_classes])
 
                 reg_in = feature * reid_mask * cls_mask
 

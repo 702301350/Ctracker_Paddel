@@ -35,11 +35,11 @@ class BA_module_resnet(nn.Layer):
         b = paddle.to_tensor(tuple_tmp[0], dtype='int32')
         cur_c = paddle.to_tensor(tuple_tmp[1], dtype='int32')
 
-        pre_fusions = [self.pre_fusions[i](pre_layers[i].view(b, -1)) for i in range(len(pre_layers))]
-        cur_fusion = self.cur_fusion(cur_layer.view(b, -1))
+        pre_fusions = [self.pre_fusions[i](pre_layers[i].reshape([b, -1])) for i in range(len(pre_layers))]
+        cur_fusion = self.cur_fusion(cur_layer.reshape([b, -1]))
         fusion = cur_fusion + sum(pre_fusions)
 
-        att_weights = self.generation(fusion).view(b, cur_c, 1, 1)
+        att_weights = self.generation(fusion).reshape([b, cur_c, 1, 1])
 
         return att_weights
 

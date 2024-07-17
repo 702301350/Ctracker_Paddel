@@ -14,7 +14,7 @@ class Anchors(nn.Layer):
         if ratios is None:
             self.ratios = np.array([2.90, ])
         if scales is None:
-            self.scales = [np.array(38., ), np.array([86., ]), np.array([112., ]), np.array([156., ]),
+            self.scales = [np.array([38., ]), np.array([86., ]), np.array([112., ]), np.array([156., ]),
                            np.array([328., ])]
 
     def forward(self, image_shape):
