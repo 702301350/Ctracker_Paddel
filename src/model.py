@@ -219,11 +219,11 @@ class BAResNext(nn.Layer):
         self.layer4 = self._make_layer(block, 512, layers[3], groups, stride=2, dilate=replace_stride_with_dilation[2])
 
         if block == utils.BasicBlock:
-            fpn_sizes = [self.layer2[layers[1] - 1].conv2.weight.shape[0], self.layer3[layers[2] - 1].conv2.weight.shape[0],
-                         self.layer4[layers[3] - 1].conv2.weight.shape[0]]
+            fpn_sizes = [self.layer2[layers[1] - 1].conv2.out_channels, self.layer3[layers[2] - 1].conv2.out_channels,
+                         self.layer4[layers[3] - 1].conv2.out_channels]
         elif block == utils.Bottleneck:
-            fpn_sizes = [self.layer2[layers[1] - 1].conv3.weight.shape[0], self.layer3[layers[2] - 1].conv3.weight.shape[0],
-                         self.layer4[layers[3] - 1].conv3.weight.shape[0]]
+            fpn_sizes = [self.layer2[layers[1] - 1].conv3.out_channels, self.layer3[layers[2] - 1].conv3.out_channels,
+                         self.layer4[layers[3] - 1].conv3.out_channels]
 
         self.fpn = PyramidFeatures(fpn_sizes[0], fpn_sizes[1], fpn_sizes[2])
         self.num_classes = num_classes
@@ -241,17 +241,19 @@ class BAResNext(nn.Layer):
 
         for m in self.sublayers():
             if isinstance(m, nn.Conv2D):
-                nn.initializer.KaimingNormal(fan_in=None)(m.weight)
+                init_kaiming = nn.initializer.KaimingNormal(nonlinearity='relu')
+                init_kaiming(m.weight)
             elif isinstance(m, (nn.BatchNorm2D, nn.GroupNorm)):
-                constant_init = paddle.nn.initializer.Constant(value=0.0)
+                constant_init = paddle.nn.initializer.Constant(value=1.0)
                 constant_init(m.weight)
+                constant_init = paddle.nn.initializer.Constant(value=0.0)
                 constant_init(m.bias)
 
         if zero_init_residual:
-            for m in self.modules():
+            for m in self.sublayers():
                 if isinstance(m, utils.Bottleneck):
                     constant_init = paddle.nn.initializer.Constant(value=0.0)
-                    constant_init(m.bn3.weight, 0)
+                    constant_init(m.bn3.weight)
 
         prior = 0.01
 
@@ -324,13 +326,13 @@ class BAResNext(nn.Layer):
 
         features = self.fpn([x2, x3, x4])
 
-        anchors = self.anchors(img_batch.shape[2:])
+        anchors = self.anchors(tuple(img_batch.shape)[2:])
 
         if self.training:
             track_features = []
             for ind, featmap in enumerate(features):
-                featmap_t, featmap_t1 = paddle.chunk(featmap, chunks=2, axis=0)
-                track_features.append(paddle.concat((featmap_t, featmap_t1), axis=1))
+                featmap_t, featmap_t1 = paddle.chunk(x=featmap, chunks=2, axis=0)
+                track_features.append(paddle.concat(x=(featmap_t, featmap_t1), axis=1))
 
             reg_features = []
             cls_features = []
@@ -340,12 +342,14 @@ class BAResNext(nn.Layer):
 
                 reid_feat = reid_mask.transpose(perm=[0, 2, 3, 1])
                 batch_size, width, height, _ = tuple(reid_feat.shape)
-                reid_feat = reid_feat.reshape([batch_size, -1, self.num_classes])
+                # reid_feat = reid_feat.reshape([batch_size, -1, self.num_classes])
+                reid_feat = reid_feat.view(batch_size, -1, self.num_classes)
 
                 cls_mask = self.classificationModel(feature)
 
                 cls_feat = cls_mask.transpose(perm=[0, 2, 3, 1])
-                cls_feat = cls_feat.reshape([batch_size, -1, self.num_classes])
+                # cls_feat = cls_feat.reshape([batch_size, -1, self.num_classes])
+                cls_feat = cls_feat.view(batch_size, -1, self.num_classes)
 
                 reg_in = feature * reid_mask * cls_mask
 
@@ -354,20 +358,20 @@ class BAResNext(nn.Layer):
                 reg_features.append(reg_feat)
                 cls_features.append(cls_feat)
                 reid_features.append(reid_feat)
-            regression = paddle.concat(reg_features, axis=1)
+            regression = paddle.concat(x=reg_features, axis=1)
 
-            classification = paddle.concat(cls_features, axis=1)
+            classification = paddle.concat(x=cls_features, axis=1)
 
-            reid = paddle.concat(reid_features, axis=1)
+            reid = paddle.concat(x=reid_features, axis=1)
 
             return self.focalLoss(classification, regression, anchors, annotations_1, annotations_2), self.reidfocalLoss(reid, anchors, annotations_1, annotations_2)
 
         else:
             if last_feat is None:
-                return paddle.zeros(0), paddle.zeros(shape=[0, 4]), features
+                return paddle.zeros(shape=[0]), paddle.zeros(shape=[0, 4]), features
             track_features = []
             for ind, featmap in enumerate(features):
-                track_features.append(paddle.concat((last_feat[ind], featmap), axis=1))
+                track_features.append(paddle.concat(x=(last_feat[ind], featmap), axis=1))
 
             reg_features = []
             cls_features = []
@@ -375,13 +379,13 @@ class BAResNext(nn.Layer):
             for ind, feature in enumerate(track_features):
                 reid_mask = self.reidModel(feature)
 
-                reid_feat = reid_mask.permute(perm=[0, 2, 3, 1])
+                reid_feat = reid_mask.transpose(perm=[0, 2, 3, 1])
                 batch_size, width, height, _ = tuple(reid_feat.shape)
                 reid_feat = reid_feat.view(batch_size, -1, self.num_classes)
 
                 cls_mask = self.classificationModel(feature)
 
-                cls_feat = cls_mask.permute(perm=[0, 2, 3, 1])
+                cls_feat = cls_mask.transpose(perm=[0, 2, 3, 1])
                 cls_feat = cls_feat.view(batch_size, -1, self.num_classes)
 
                 reg_in = feature * reid_mask * cls_mask
@@ -401,8 +405,8 @@ class BAResNext(nn.Layer):
 
             transformed_anchors = self.regressBoxes(anchors, regression)
 
-            scores = paddle.max(classification, axis=2, keepdim=True)[0]
-
+            scores = (paddle.max(x=classification, axis=2, keepdim=True),
+                      paddle.argmax(x=classification, axis=2, keepdim=True))[0]
             scores_over_thresh = (scores > 0.05)[0, :, 0]
 
             if scores_over_thresh.sum() == 0:
@@ -415,7 +419,7 @@ class BAResNext(nn.Layer):
             reid_score = reid_score[:, scores_over_thresh, :]
 
             final_bboxes = cython_soft_nms_wrapper(0.7, method='gaussian')(
-                paddle.concat([transformed_anchors[:, :, :].contiguous(), scores, reid_score], axis=2)[0, :, :].cpu().numpy())
+                paddle.concat(x=[transformed_anchors[:, :, :].contiguous(), scores, reid_score], axis=2)[0, :, :].cpu().numpy())
 
             return final_bboxes[:, -2], final_bboxes, features
 

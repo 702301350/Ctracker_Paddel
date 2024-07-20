@@ -146,7 +146,7 @@ def main(args=None):
 
     retinanet.eval()
 
-    paddle.save(retinanet, os.path.join(parser.model_dir, 'model_final.pt'))
+    paddle.save(retinanet, os.path.join(parser.model_dir, 'model_final.pdparams'))
     run_from_train(parser.model_dir, parser.root_path)
 
 
