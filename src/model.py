@@ -91,9 +91,9 @@ class RegressionModel(nn.Layer):
 
         out = self.output(out)
 
-        out = out.transpose(0, 2, 3, 1)
+        out = out.transpose([0, 2, 3, 1])
 
-        return out.contiguous().reshape([out.shape[0], -1, 8])
+        return out.contiguous().view([tuple(out.shape[0]), -1, 8])
 
 
 # 目标分类分支(Object Classification branch)：使用4个连续的3*3卷积和relu激活层交错进行特征学习，最后使用一个3*3的卷积加sigmoid激活函数预测置信度
@@ -343,13 +343,13 @@ class BAResNext(nn.Layer):
                 reid_feat = reid_mask.transpose(perm=[0, 2, 3, 1])
                 batch_size, width, height, _ = tuple(reid_feat.shape)
                 # reid_feat = reid_feat.reshape([batch_size, -1, self.num_classes])
-                reid_feat = reid_feat.view(batch_size, -1, self.num_classes)
+                reid_feat = reid_feat.view([batch_size, -1, self.num_classes])
 
                 cls_mask = self.classificationModel(feature)
 
                 cls_feat = cls_mask.transpose(perm=[0, 2, 3, 1])
                 # cls_feat = cls_feat.reshape([batch_size, -1, self.num_classes])
-                cls_feat = cls_feat.view(batch_size, -1, self.num_classes)
+                cls_feat = cls_feat.view([batch_size, -1, self.num_classes])
 
                 reg_in = feature * reid_mask * cls_mask
 
@@ -381,12 +381,12 @@ class BAResNext(nn.Layer):
 
                 reid_feat = reid_mask.transpose(perm=[0, 2, 3, 1])
                 batch_size, width, height, _ = tuple(reid_feat.shape)
-                reid_feat = reid_feat.view(batch_size, -1, self.num_classes)
+                reid_feat = reid_feat.view([batch_size, -1, self.num_classes])
 
                 cls_mask = self.classificationModel(feature)
 
                 cls_feat = cls_mask.transpose(perm=[0, 2, 3, 1])
-                cls_feat = cls_feat.view(batch_size, -1, self.num_classes)
+                cls_feat = cls_feat.view([batch_size, -1, self.num_classes])
 
                 reg_in = feature * reid_mask * cls_mask
 

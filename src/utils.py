@@ -31,15 +31,16 @@ class BA_module_resnet(nn.Layer):
         )
 
     def forward(self, pre_layers, cur_layer):
-        tuple_tmp = cur_layer.shape
-        b = paddle.to_tensor(tuple_tmp[0], dtype='int32')
-        cur_c = paddle.to_tensor(tuple_tmp[1], dtype='int32')
+        # tuple_tmp = cur_layer.shape
+        # b = paddle.to_tensor(tuple_tmp[0], dtype='int32')
+        # cur_c = paddle.to_tensor(tuple_tmp[1], dtype='int32')
+        b, cur_c, _, _ = tuple(cur_layer.shape)
 
-        pre_fusions = [self.pre_fusions[i](pre_layers[i].reshape([b, -1])) for i in range(len(pre_layers))]
-        cur_fusion = self.cur_fusion(cur_layer.reshape([b, -1]))
+        pre_fusions = [self.pre_fusions[i](pre_layers[i].view([b, -1])) for i in range(len(pre_layers))]
+        cur_fusion = self.cur_fusion(cur_layer.view([b, -1]))
         fusion = cur_fusion + sum(pre_fusions)
 
-        att_weights = self.generation(fusion).reshape([b, cur_c, 1, 1])
+        att_weights = self.generation(fusion).view([b, cur_c, 1, 1])
 
         return att_weights
 
@@ -52,10 +53,10 @@ class BasicBlock(nn.Layer):
                  norm_layer=None, *, reduction=16):
         super(BasicBlock, self).__init__()
         self.conv1 = conv3x3(inplanes, planes, stride)
-        self.bn1 = nn.BatchNorm2D(planes)
+        self.bn1 = nn.BatchNorm2D(num_features=planes)
         self.relu = nn.ReLU()
         self.conv2 = conv3x3(planes, planes)
-        self.bn2 = nn.BatchNorm2D(planes)
+        self.bn2 = nn.BatchNorm2D(num_features=planes)
         self.downsample = downsample
         self.stride = stride
 
@@ -84,7 +85,7 @@ class Bottleneck(nn.Layer):
 
     def __init__(self, inplanes, planes, stride=1, downsample=None, groups=32, base_width=4, reduction=16):
         super(Bottleneck, self).__init__()
-        width = int(planes * (base_width / 64.)) * groups
+        width = int(planes * (base_width / 64.0)) * groups
         self.conv1 = nn.Conv2D(inplanes, width, kernel_size=1, bias_attr=False)
 
         self.bn1 = nn.BatchNorm2D(width)
@@ -136,11 +137,11 @@ class BBoxTransform(nn.Layer):
     def __init__(self, mean=None, std=None):
         super(BBoxTransform, self).__init__()
         if mean is None:
-            self.mean = paddle.to_tensor(np.array([0, 0, 0, 0]).astype(np.float32)).cuda()
+            self.mean = paddle.to_tensor(np.array([0, 0, 0, 0]).astype(np.float32)).cuda(blocking=True)
         else:
             self.mean = mean
         if std is None:
-            self.std = paddle.to_tensor(np.array([0.1, 0.1, 0.2, 0.2]).astype(np.float32)).cuda()
+            self.std = paddle.to_tensor(np.array([0.1, 0.1, 0.2, 0.2]).astype(np.float32)).cuda(blocking=True)
         else:
             self.std = std
 
@@ -170,7 +171,7 @@ class BBoxTransform(nn.Layer):
         pred_boxes_x2 = pred_boxes_x2[:, :, :, np.newaxis]
         pred_boxes_y2 = pred_boxes_y2[:, :, :, np.newaxis]
 
-        pred_boxes = paddle.stack([pred_boxes_x1, pred_boxes_y1, pred_boxes_x2, pred_boxes_y2]).reshape(boxes.shape)
+        pred_boxes = paddle.stack([pred_boxes_x1, pred_boxes_y1, pred_boxes_x2, pred_boxes_y2], axis=3).reshape(tuple(boxes.shape))
 
         return pred_boxes
 
@@ -182,12 +183,12 @@ class ClipBoxes(nn.Layer):
 
     def forward(self, boxes, img):
 
-        batch_size, num_channels, height, width = img.shape
+        batch_size, num_channels, height, width = tuple(img.shape)
 
-        boxes[:, :, 0::4] = paddle.Tensor.clip(boxes[:, :, 0::4], min=0)
-        boxes[:, :, 1::4] = paddle.Tensor.clip(boxes[:, :, 1::4], min=0)
+        boxes[:, :, 0::4] = paddle.clip(boxes[:, :, 0::4], min=0)
+        boxes[:, :, 1::4] = paddle.clip(boxes[:, :, 1::4], min=0)
 
-        boxes[:, :, 2::4] = paddle.Tensor.clip(boxes[:, :, 2::4], max=width)
-        boxes[:, :, 3::4] = paddle.Tensor.clip(boxes[:, :, 3::4], max=height)
+        boxes[:, :, 2::4] = paddle.clip(boxes[:, :, 2::4], max=width)
+        boxes[:, :, 3::4] = paddle.clip(boxes[:, :, 3::4], max=height)
 
         return boxes
