@@ -9,8 +9,8 @@ import losses
 from paddle import nn
 from lib.nms import cython_soft_nms_wrapper
 
-pth_model_url = './path/resnext50_32x4d-7cdf4587.pth'  # model path
-
+pth_model_url = '/home/pjc/project/CTracker_Du/PaddlePath/model.pdparams'
+# pth_model_url = '../pth/model.pdparams'  # model path
 
 # 金字塔特征
 class PyramidFeatures(nn.Layer):
@@ -65,13 +65,13 @@ class RegressionModel(nn.Layer):
         self.conv1 = nn.Conv2D(num_features_in, features_size, kernel_size=3, padding=1)
         self.act1 = nn.ReLU()
 
-        self.conv2 = nn.Conv2D(num_features_in, features_size, kernel_size=3, padding=1)
+        self.conv2 = nn.Conv2D(features_size, features_size, kernel_size=3, padding=1)
         self.act2 = nn.ReLU()
 
-        self.conv3 = nn.Conv2D(num_features_in, features_size, kernel_size=3, padding=1)
+        self.conv3 = nn.Conv2D(features_size, features_size, kernel_size=3, padding=1)
         self.act3 = nn.ReLU()
 
-        self.conv4 = nn.Conv2D(num_features_in, features_size, kernel_size=3, padding=1)
+        self.conv4 = nn.Conv2D(features_size, features_size, kernel_size=3, padding=1)
         self.act4 = nn.ReLU()
 
         self.output = nn.Conv2D(features_size, num_anchors * 8, kernel_size=3, padding=1)
@@ -98,7 +98,7 @@ class RegressionModel(nn.Layer):
 
 # 目标分类分支(Object Classification branch)：使用4个连续的3*3卷积和relu激活层交错进行特征学习，最后使用一个3*3的卷积加sigmoid激活函数预测置信度
 class ClassificationModel(nn.Layer):
-    def __init__(self, num_features_in, num_anchors=1, num_classes=80, prior=0.01, feature_size=512): # bbsp: 256
+    def __init__(self, num_features_in, num_anchors=1, num_classes=80, prior=0.01, feature_size=256): # bbsp: 256
         super(ClassificationModel, self).__init__()
 
         self.num_classes = num_classes
@@ -419,11 +419,10 @@ class BAResNext(nn.Layer):
 
             return final_bboxes[:, -2], final_bboxes, features
 
-
 def resnext50_32x4d(num_classes, pretrained=False, **kwargs):
     model = BAResNext(num_classes, utils.Bottleneck, [3, 4, 6, 3], **kwargs)
     if pretrained:
-        checkpoint = paddle.load('../pth/model.pdparams')
+        checkpoint = paddle.load(pth_model_url)
         model.set_state_dict(checkpoint, use_structured_name=False)
         print(model)
 

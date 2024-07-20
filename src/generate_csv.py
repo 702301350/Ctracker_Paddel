@@ -3,7 +3,7 @@ import numpy as np
 import matplotlib.pyplot as plt
 import pandas as pd
 
-root_dir = r''
+root_dir = r'/home/pjc/project/Datas/Mot/MOT17/train'
 root1_dir = 'train/'
 result_csv = 'train_annots.csv'
 
