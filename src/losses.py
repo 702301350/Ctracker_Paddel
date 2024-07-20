@@ -217,30 +217,20 @@ class FocalLossReid(paddle.nn.Layer):
                 [:, 5], y=paddle.to_tensor(assigned_annotations_next[:, 5])), :
                 ] = 0
             targets[paddle.less_than(x=best_truth_overlap, y=paddle.
-                to_tensor(0.4)) | paddle.less_than(x=
-                best_truth_overlap_next, y=paddle.to_tensor(0.4)), :] = 0
+                to_tensor(0.4)) | paddle.
+                less_than(x=best_truth_overlap_next, y=paddle.to_tensor(0.4)), :] = 0
             targets[paddle.less_than(x=best_truth_overlap, y=paddle.
-                to_tensor(reid_pos_thres)) & paddle.greater_equal(x=
-                best_truth_overlap, y=paddle.to_tensor(0.4)) & paddle.
-                less_than(x=best_truth_overlap_next, y=paddle.to_tensor(
-                reid_pos_thres)) & paddle.greater_equal(x=
-                best_truth_overlap_next, y=paddle.to_tensor(0.4)), :] = -1
-            positive_indices = paddle.greater_equal(x=targets, y=paddle.
-                to_tensor(1))
+                to_tensor(reid_pos_thres)) & paddle.greater_equal(x=best_truth_overlap, y=paddle.to_tensor(0.4)) & paddle.
+                less_than(x=best_truth_overlap_next, y=paddle.to_tensor(reid_pos_thres)) & paddle.greater_equal(x=best_truth_overlap_next, y=paddle.to_tensor(0.4)), :] = -1
+            targets = paddle.cast(targets, dtype='int64')
+            positive_indices = paddle.greater_equal(x=targets, y=paddle.to_tensor(1, dtype='int64'))
             num_positive_anchors = positive_indices.sum()
-            alpha_factor = paddle.ones(shape=tuple(targets.shape)).cuda(
-                blocking=True) * alpha
-            alpha_factor = paddle.where(condition=paddle.equal(x=targets, y
-                =1.0), x=alpha_factor, y=1.0 - alpha_factor)
-            focal_weight = paddle.where(condition=paddle.equal(x=targets, y
-                =1.0), x=1.0 - classification, y=classification)
+            alpha_factor = paddle.ones(shape=tuple(targets.shape)).cuda(blocking=True) * alpha
+            alpha_factor = paddle.where(condition=paddle.equal(x=targets, y=1.0), x=alpha_factor, y=1.0 - alpha_factor)
+            focal_weight = paddle.where(condition=paddle.equal(x=targets, y=1.0), x=1.0 - classification, y=classification)
             focal_weight = alpha_factor * paddle.pow(x=focal_weight, y=gamma)
-            bce = -(targets * paddle.log(x=classification) + (1.0 - targets
-                ) * paddle.log(x=1.0 - classification))
+            bce = -(targets * paddle.log(x=classification) + (1.0 - targets) * paddle.log(x=1.0 - classification))
             cls_loss = focal_weight * bce
-            cls_loss = paddle.where(condition=paddle.not_equal(x=targets, y
-                =paddle.to_tensor(-1.0)), x=cls_loss, y=paddle.zeros(shape=
-                tuple(cls_loss.shape)).cuda(blocking=True))
-            classification_losses.append(cls_loss.sum() / paddle.clip(x=
-                num_positive_anchors.astype(dtype='float32'), min=1.0))
+            cls_loss = paddle.where(condition=paddle.not_equal(x=targets, y=paddle.to_tensor(-1.0, dtype='int64')), x=cls_loss, y=paddle.zeros(shape=tuple(cls_loss.shape)).cuda(blocking=True))
+            classification_losses.append(cls_loss.sum() / paddle.clip(x=num_positive_anchors.astype(dtype='float32'), min=1.0))
         return paddle.stack(x=classification_losses).mean(axis=0, keepdim=True)
