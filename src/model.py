@@ -219,11 +219,11 @@ class BAResNext(nn.Layer):
         self.layer4 = self._make_layer(block, 512, layers[3], groups, stride=2, dilate=replace_stride_with_dilation[2])
 
         if block == utils.BasicBlock:
-            fpn_sizes = [self.layer2[layers[1] - 1].conv2.out_channels, self.layer3[layers[2] - 1].conv2.out_channels,
-                         self.layer4[layers[3] - 1].conv2.out_channels]
+            fpn_sizes = [self.layer2[layers[1] - 1].conv2.weight.shape[0], self.layer3[layers[2] - 1].conv2.weight.shape[0],
+                         self.layer4[layers[3] - 1].conv2.weight.shape[0]]
         elif block == utils.Bottleneck:
-            fpn_sizes = [self.layer2[layers[1] - 1].conv3.out_channels, self.layer3[layers[2] - 1].conv3.out_channels,
-                         self.layer4[layers[3] - 1].conv3.out_channels]
+            fpn_sizes = [self.layer2[layers[1] - 1].conv3.weight.shape[0], self.layer3[layers[2] - 1].conv3.weight.shape[0],
+                         self.layer4[layers[3] - 1].conv3.weight.shape[0]]
 
         self.fpn = PyramidFeatures(fpn_sizes[0], fpn_sizes[1], fpn_sizes[2])
         self.num_classes = num_classes
