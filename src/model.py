@@ -6,56 +6,12 @@ import utils
 import anchors
 import losses
 
+from wxw_SRFPN import SRFPN
 from paddle import nn
 from lib.nms import cython_soft_nms_wrapper
 
 pth_model_url = '/home/pjc/project/CTracker_Du/PaddlePath/model.pdparams'
 # pth_model_url = '../pth/model.pdparams'  # model path
-
-# 金字塔特征
-class PyramidFeatures(nn.Layer):
-    def __init__(self, C3_size, C4_size, C5_size, feature_size=256):
-        super(PyramidFeatures, self).__init__()
-
-        self.P5_1 = nn.Conv2D(C5_size, feature_size, kernel_size=1, stride=1, padding=0)
-        self.P5_upsampled = nn.Upsample(scale_factor=2, mode='nearest')
-        self.P5_2 = nn.Conv2D(feature_size, feature_size, kernel_size=3, stride=1, padding=1)
-
-        self.P4_1 = nn.Conv2D(C4_size, feature_size, kernel_size=1, stride=1, padding=0)
-        self.P4_upsampled = nn.Upsample(scale_factor=2, mode='nearest')
-        self.P4_2 = nn.Conv2D(feature_size, feature_size, kernel_size=3, stride=1, padding=1)
-
-        self.P3_1 = nn.Conv2D(C3_size, feature_size, kernel_size=1, stride=1, padding=0)
-        self.P3_2 = nn.Conv2D(feature_size, feature_size, kernel_size=3, stride=1, padding=1)
-
-        self.P6 = nn.Conv2D(C5_size, feature_size, kernel_size=3, stride=2, padding=1)
-
-        self.P7_1 = nn.ReLU()
-        self.P7_2 = nn.Conv2D(feature_size, feature_size, kernel_size=3, stride=2, padding=1)
-
-    def forward(self, inputs):
-        C3, C4, C5 = inputs
-
-        P5_x = self.P5_1(C5)  # M5
-        P5_upsampled_x = self.P5_upsampled(P5_x)  # 2x
-        P5_x = self.P5_2(P5_x)  # P5
-
-        P4_x = self.P4_1(C4)
-        P4_x = P5_upsampled_x + P4_x  # M4
-        P4_upsampled_x = self.P4_upsampled(P4_x)  # 2X
-        P4_x = self.P4_2(P4_x)  # P4
-
-        P3_x = self.P3_1(C3)
-        P3_x = P3_x + P4_upsampled_x  # M3
-        P3_x = self.P3_2(P3_x)  # P3
-
-        P6_x = self.P6(C5)  # P6
-
-        P7_x = self.P7_1(P6_x)
-        P7_x = self.P7_2(P7_x)  # P7
-
-        return [P3_x, P4_x, P5_x, P6_x, P7_x]
-
 
 # 成对边界框回归(Paired Boxes Regression)：使用4个连续的3*3卷积和relu激活层交错进行特征学习，为每个目标返回一个边界框对
 class RegressionModel(nn.Layer):
@@ -94,7 +50,6 @@ class RegressionModel(nn.Layer):
         out = out.transpose([0, 2, 3, 1])
 
         return out.view([tuple(out.shape)[0], -1, 8])
-
 
 # 目标分类分支(Object Classification branch)：使用4个连续的3*3卷积和relu激活层交错进行特征学习，最后使用一个3*3的卷积加sigmoid激活函数预测置信度
 class ClassificationModel(nn.Layer):
@@ -225,7 +180,7 @@ class BAResNext(nn.Layer):
             fpn_sizes = [self.layer2[layers[1] - 1].conv3.weight.shape[0], self.layer3[layers[2] - 1].conv3.weight.shape[0],
                          self.layer4[layers[3] - 1].conv3.weight.shape[0]]
 
-        self.fpn = PyramidFeatures(fpn_sizes[0], fpn_sizes[1], fpn_sizes[2])
+        self.fpn = SRFPN(fpn_sizes[0], fpn_sizes[1], fpn_sizes[2])
         self.num_classes = num_classes
 
         self.regressionModel = RegressionModel(512)

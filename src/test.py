@@ -1,23 +1,28 @@
-import argparse
-import math
+import sys
+import paddle_aux
+import paddle
 import os
-
-import cv2
 import numpy as np
-import skimage
-import skimage.color
+import time
+import math
+import copy
+import pdb
+import argparse
+import sys
+import cv2
 import skimage.io
 import skimage.transform
-import paddle
+import skimage.color
+import skimage
+from dataloader import CSVDataset, collater, Resizer, AspectRatioBasedSampler, Augmenter, UnNormalizer, Normalizer, RGB_MEAN, RGB_STD
 from scipy.optimize import linear_sum_assignment
-
-from dataloader import RGB_MEAN, RGB_STD
-
-print('CUDA available: {}'.format(paddle.device.cuda.device_count()))
-
-color_list = [(0, 0, 255), (255, 0, 0), (0, 255, 0), (255, 0, 255), (0, 255, 255), (255, 255, 0), (128, 0, 255),
-              (0, 128, 255), (128, 255, 0), (0, 255, 128), (255, 128, 0), (255, 0, 128), (128, 128, 255),
-              (128, 255, 128), (255, 128, 128), (128, 128, 0), (128, 0, 128)]
+from thop import profile
+from thop import clever_format
+print('CUDA available: {}'.format(paddle.device.cuda.device_count() >= 1))
+color_list = [(0, 0, 255), (255, 0, 0), (0, 255, 0), (255, 0, 255), (0, 255,
+    255), (255, 255, 0), (128, 0, 255), (0, 128, 255), (128, 255, 0), (0, 
+    255, 128), (255, 128, 0), (255, 0, 128), (128, 128, 255), (128, 255, 
+    128), (255, 128, 128), (128, 128, 0), (128, 0, 128)]
 
 
 class detect_rect:
@@ -42,6 +47,7 @@ class detect_rect:
 
 
 class tracklet:
+
     def __init__(self, det_rect):
         self.id = det_rect.id
         self.rect_list = [det_rect]
@@ -49,28 +55,115 @@ class tracklet:
         self.last_rect = det_rect
         self.last_frame = det_rect.curr_frame
         self.no_match_frame = 0
+        self.last_observation = np.array([-1, -1, -1, -1])
+        self.observations = []
+        self.vel = np.array((0, 0))
 
     def add_rect(self, det_rect):
-        self.rect_list.append(det_rect)  # 增加检测结果
+        self.rect_list.append(det_rect)
         self.rect_num = self.rect_num + 1
         self.last_rect = det_rect
-        self.last_frame = det_rect.curr_frame  # 重要，轨迹的最后一帧的帧序等于当前检测结果的帧序
+        self.last_frame = det_rect.curr_frame
+        if self.last_observation.sum() > 0:
+            previous_box = None
+            for i in range(3):
+                dt = 3 - i
+                if self.last_frame - dt in range(len(self.observations)):
+                    previous_box = self.observations[self.last_frame - dt]
+                    break
+            if previous_box is None:
+                previous_box = self.last_observation
+            self.vel = speed_direction(previous_box, det_rect.curr_rect)
+        self.observations.append(det_rect.curr_rect)
+        self.last_observation = det_rect.curr_rect
 
     @property
     def velocity(self):
         if self.rect_num < 2:
             return 0, 0
         elif self.rect_num < 6:
-            return (self.rect_list[self.rect_num - 1].position - self.rect_list[self.rect_num - 2].position) / (
-                        self.rect_list[self.rect_num - 1].curr_frame - self.rect_list[self.rect_num - 2].curr_frame)
+            return (self.rect_list[self.rect_num - 1].position - self.
+                rect_list[self.rect_num - 2].position) / (self.rect_list[
+                self.rect_num - 1].curr_frame - self.rect_list[self.
+                rect_num - 2].curr_frame)
         else:
-            v1 = (self.rect_list[self.rect_num - 1].position - self.rect_list[self.rect_num - 4].position) / (
-                        self.rect_list[self.rect_num - 1].curr_frame - self.rect_list[self.rect_num - 4].curr_frame)
-            v2 = (self.rect_list[self.rect_num - 2].position - self.rect_list[self.rect_num - 5].position) / (
-                        self.rect_list[self.rect_num - 2].curr_frame - self.rect_list[self.rect_num - 5].curr_frame)
-            v3 = (self.rect_list[self.rect_num - 3].position - self.rect_list[self.rect_num - 6].position) / (
-                        self.rect_list[self.rect_num - 3].curr_frame - self.rect_list[self.rect_num - 6].curr_frame)
+            v1 = (self.rect_list[self.rect_num - 1].position - self.
+                rect_list[self.rect_num - 4].position) / (self.rect_list[
+                self.rect_num - 1].curr_frame - self.rect_list[self.
+                rect_num - 4].curr_frame)
+            v2 = (self.rect_list[self.rect_num - 2].position - self.
+                rect_list[self.rect_num - 5].position) / (self.rect_list[
+                self.rect_num - 2].curr_frame - self.rect_list[self.
+                rect_num - 5].curr_frame)
+            v3 = (self.rect_list[self.rect_num - 3].position - self.
+                rect_list[self.rect_num - 6].position) / (self.rect_list[
+                self.rect_num - 3].curr_frame - self.rect_list[self.
+                rect_num - 6].curr_frame)
             return (v1 + v2 + v3) / 3
+
+
+def k_precive_observation(observations, curr_frame, k):
+    if len(observations) == 0:
+        return [-1, -1, -1, -1]
+    for i in range(k):
+        dt = k - i
+        aim_age = curr_frame - dt
+        if aim_age >= 0 and aim_age < len(observations):
+            return observations[aim_age]
+    return observations[-1]
+
+
+def speed_direction(track, det):
+    CX1, CY1 = (det[0] + det[2]) / 2.0, (det[1] + det[3]) / 2.0
+    CX2, CY2 = (track[0] + track[2]) / 2.0, (track[1] + track[3]) / 2.0
+    dx = CX2 - CX1
+    dy = CY2 - CY1
+    norm = np.sqrt(dx ** 2 + dy ** 2) + 1e-06
+    dx = dx / norm
+    dy = dy / norm
+    return dx, dy
+
+
+def DIoU(boxa, boxb):
+    inter_x1 = max(boxa[0], boxb[0])
+    inter_y1 = max(boxa[1], boxb[1])
+    inter_x2 = min(boxa[2], boxb[2])
+    inter_y2 = min(boxa[3], boxb[3])
+    inter_h = max(0, inter_y2 - inter_y1)
+    inter_w = max(0, inter_x2 - inter_x1)
+    inter_area = inter_w * inter_h
+    union_area = (boxa[3] - boxa[1]) * (boxa[2] - boxa[0]) + (boxb[3] - boxb[1]
+        ) * (boxb[2] - boxb[0]) - inter_area + 1e-08
+    ac_x1 = min(boxa[0], boxb[0])
+    ac_y1 = min(boxa[1], boxb[1])
+    ac_x2 = max(boxa[2], boxb[2])
+    ac_y2 = max(boxa[3], boxb[3])
+    boxa_ctrx = boxa[0] + (boxa[2] - boxa[0]) / 2
+    boxa_ctry = boxa[1] + (boxa[3] - boxa[1]) / 2
+    boxb_ctrx = boxb[0] + (boxb[2] - boxb[0]) / 2
+    boxb_ctry = boxb[1] + (boxb[3] - boxb[1]) / 2
+    length_box_ctr = (boxb_ctrx - boxa_ctrx) * (boxb_ctrx - boxa_ctrx) + (
+        boxb_ctry - boxa_ctry) * (boxb_ctry - boxa_ctry)
+    length_ac = (ac_x2 - ac_x1) * (ac_x2 - ac_x1) + (ac_y2 - ac_y1) * (ac_y2 -
+        ac_y1)
+    diou = inter_area / (union_area + 1e-08) - length_box_ctr / length_ac
+    return diou
+
+
+def cal_diff_angle_cost(track, det_rect, iou_val):
+    k_precive_obs = k_precive_observation(track.observations, det_rect.
+        curr_frame, 3)
+    if k_precive_obs[0] == -1:
+        diff_angle_cost = 0
+    else:
+        dx, dy = speed_direction(k_precive_obs, det_rect.curr_rect)
+        inertia_dx, inertia_dy = track.vel[0], track.vel[1]
+        diff_angle_cos = inertia_dx * dx + inertia_dy * dy
+        diff_angle_cos = np.clip(diff_angle_cos, a_min=-1, a_max=1)
+        diff_angle = np.arccos(diff_angle_cos)
+        diff_angle = (np.pi / 2 - diff_angle) / np.pi
+        diff_angle_cost = diff_angle * iou_val * 0.1
+    return diff_angle_cost
 
 
 def cal_iou(rect1, rect2):
@@ -80,50 +173,50 @@ def cal_iou(rect1, rect2):
     i_h = min(y2, y4) - max(y1, y3)
     if i_w <= 0 or i_h <= 0:
         return 0
-    i_s = i_w * i_h  # 交集
+    i_s = i_w * i_h
     s_1 = (x2 - x1) * (y2 - y1)
     s_2 = (x4 - x3) * (y4 - y3)
     return float(i_s) / (s_1 + s_2 - i_s)
 
 
-def cal_simi(det_rect1, det_rect2):
-    return cal_iou(det_rect1.next_rect, det_rect2.curr_rect)
-
-
 def cal_simi_track_det(track, det_rect):
-    if det_rect.curr_frame <= track.last_frame:  # 要求当前检测的帧序大于前一个跟踪轨迹的帧序
-        print("cal_simi_track_det error")
+    if det_rect.curr_frame <= track.last_frame:
+        print('cal_simi_track_det error')
         return 0
-    elif det_rect.curr_frame - track.last_frame == 1:  # 当前检测结果的帧序和轨迹最后一个检测的帧序相差1，则计算两者的IOU
-        return cal_iou(track.last_rect.next_rect, det_rect.curr_rect)  # 调用cal_iou(),计算IOU
+    elif det_rect.curr_frame - track.last_frame == 1:
+        iou = cal_iou(track.last_rect.next_rect, det_rect.curr_rect)
+        iou_val = DIoU(track.last_rect.next_rect, det_rect.curr_rect)
+        diff_angle_cost = cal_diff_angle_cost(track, det_rect, iou_val)
+        return iou + diff_angle_cost
     else:
-        pred_rect = track.last_rect.curr_rect + np.append(track.velocity, track.velocity) * (
-                    det_rect.curr_frame - track.last_frame)
-        return cal_iou(pred_rect, det_rect.curr_rect)
+        pred_rect = track.last_rect.curr_rect + np.append(track.velocity,
+            track.velocity) * (det_rect.curr_frame - track.last_frame)
+        iou = cal_iou(pred_rect, det_rect.curr_rect)
+        iou_val = DIoU(pred_rect, det_rect.curr_rect)
+        diff_angle_cost = cal_diff_angle_cost(track, det_rect, iou_val)
+        return iou + diff_angle_cost
 
 
-def track_det_match(tracklet_list, det_rect_list, min_iou=0.5):  #
-    num1 = len(tracklet_list)  # 24
-    num2 = len(det_rect_list)  # 23
+def track_det_match(tracklet_list, det_rect_list, min_iou=0.5):
+    num1 = len(tracklet_list)
+    num2 = len(det_rect_list)
     cost_mat = np.zeros((num1, num2))
     for i in range(num1):
         for j in range(num2):
-            cost_mat[i, j] = -cal_simi_track_det(tracklet_list[i], det_rect_list[j])  # 调用cal_simi_track_det()函数，为啥带个负号
-
-    match_result = linear_sum_assignment(cost_mat)  # 匈牙利算法进行匹配
-    match_result = np.asarray(match_result)  # 轨迹池中的第16个跟踪目标未被匹配(轨迹池中的目标数大于检测结果目标数). np.asarray:将结构数据转换为数组类型
-    match_result = np.transpose(
-        match_result)  # 跟踪-检测对 [[0，0],[1，1],[2，2],[3，3],[4，7],[5，5],[6，6],[7，11],[8，9],[9，4],[10，10],[11，8]，[12，13],[13，14],[14，15],[15，12],[17，18],[18，17],[19，19],[20，16],[21,21],[22，20],[23，22]]
-
+            cost_mat[i, j] = -cal_simi_track_det(tracklet_list[i],
+                det_rect_list[j])
+    match_result = linear_sum_assignment(cost_mat)
+    match_result = np.asarray(match_result)
+    match_result = np.transpose(match_result)
     matches, unmatched1, unmatched2 = [], [], []
     for i in range(num1):
         if i not in match_result[:, 0]:
-            unmatched1.append(i)  # 未匹配的跟踪
+            unmatched1.append(i)
     for j in range(num2):
         if j not in match_result[:, 1]:
-            unmatched2.append(j)  # 未匹配的检测
+            unmatched2.append(j)
     for i, j in match_result:
-        if cost_mat[i, j] > -min_iou:  # min_iou:0.5
+        if cost_mat[i, j] > -min_iou:
             unmatched1.append(i)
             unmatched2.append(j)
         else:
@@ -133,173 +226,158 @@ def track_det_match(tracklet_list, det_rect_list, min_iou=0.5):  #
 
 def draw_caption(image, box, caption, color):
     b = np.array(box).astype(int)
-    cv2.putText(image, caption, (b[0], b[1] - 8), cv2.FONT_HERSHEY_PLAIN, 2, color, 2)  # (b[0], b[1] - 8)：字体位置
+    cv2.putText(image, caption, (b[0], b[1] - 8), cv2.FONT_HERSHEY_PLAIN, 2,
+        color, 2)
 
 
 def run_each_dataset(model_dir, retinanet, dataset_path, subset, cur_dataset):
-    print(cur_dataset)  # current dataset sequence
-
-    img_list = os.listdir(os.path.join(dataset_path, subset, cur_dataset, 'img1'))
-    img_list = [os.path.join(dataset_path, subset, cur_dataset, 'img1', _) for _ in img_list if
-                ('jpg' in _) or ('png' in _)]
-    img_list = sorted(img_list)  # 对加载的图片进行排序
-
-    img_len = len(img_list)  # 视频序列长度
-    last_feat = None  # 在model.py出现了if last_feat is None，应该是用于测试
-
-    confidence_threshold = 0.4  # 检测置信值的阈值
+    print(cur_dataset)
+    img_list = os.listdir(os.path.join(dataset_path, subset, cur_dataset,
+        'img1'))
+    img_list = [os.path.join(dataset_path, subset, cur_dataset, 'img1', _) for
+        _ in img_list if 'jpg' in _ or 'png' in _]
+    img_list = sorted(img_list)
+    img_len = len(img_list)
+    last_feat = None
+    confidence_threshold = 0.4
     IOU_threshold = 0.5
-    retention_threshold = 10  # 保留阈值，大于该阈值，则删除该轨迹
-
-    det_list_all = []  # 最重要变量1，加载所有视频帧的pred_bbox(经过soft-max后)
-    tracklet_all = []  # 最重要变量2，加载所有视频帧的跟踪轨迹
+    retention_threshold = 30
+    det_list_all = []
+    tracklet_all = []
     max_id = 0
-    max_draw_len = 100  # 最大的轨迹长度
-    draw_interval = 5  # 间隔
-    img_width = 1920  # MOT20-01和MOT20-02：img_width和img_height分别为1920和1080，MOT20-03：[1173，880], MOT20-05：[1654，1080]
+    max_draw_len = 100
+    draw_interval = 5
+    img_width = 1920
     img_height = 1080
     fps = 30
-
-    for i in range(img_len):  # det_list_all:存储所有帧的detections
+    for i in range(img_len):
         det_list_all.append([])
-
+    frame_times = []
     for idx in range(img_len + 1):
         i = idx - 1
         print('tracking: ', i)
+        start_time = time.time()
+        print('start_time: ', start_time)
         with paddle.no_grad():
             data_path1 = img_list[min(idx, img_len - 1)]
-            img_origin1 = skimage.io.imread(data_path1)  # 读取图片
-            img_h, img_w, _ = img_origin1.shape
+            img_origin1 = skimage.io.imread(data_path1)
+            img_h, img_w, _ = tuple(img_origin1.shape)
             img_height, img_width = img_h, img_w
             resize_h, resize_w = math.ceil(img_h / 32) * 32, math.ceil(
-                img_w / 32) * 32  # 使图像的长、宽是32的倍数. math.ceil:向上取整，即小数部分直接舍去，并向整数部分进1
-            img1 = np.zeros((resize_h, resize_w, 3), dtype=img_origin1.dtype)  # [1088，1920，3]
+                img_w / 32) * 32
+            img1 = np.zeros((resize_h, resize_w, 3), dtype=img_origin1.dtype)
             img1[:img_h, :img_w, :] = img_origin1
-            img1 = (img1.astype(np.float32) / 255.0 - np.array([[RGB_MEAN]])) / np.array(
-                [[RGB_STD]])  # astype:对数据类型进行转换，除以255就是归一化
-            img1 = paddle.from_numpy(img1).permute(2, 0, 1).view(1, 3, resize_h, resize_w)  # [1，3，1088,1920]
-            # scores:前景的置信度得分,transformed_anchors:经过soft-nms后的pred_boxes， last_feat：5个特征级上的特征
-            scores, transformed_anchors, last_feat = retinanet(img1.cuda().float(), last_feat=last_feat)  # 执行检测过程(重要)
+            img1 = (img1.astype(np.float32) / 255.0 - np.array([[RGB_MEAN]])
+                ) / np.array([[RGB_STD]])
+            img1 = paddle.to_tensor(data=img1).transpose(perm=[2, 0, 1]).view(
+                1, 3, resize_h, resize_w)
+            scores, transformed_anchors, last_feat = retinanet(img1.cuda(
+                blocking=True).astype(dtype='float32'), last_feat=last_feat)
             if idx > 0:
-                idxs = np.where(scores > 0.1)  # 检测置信值(前景的置信度)大于0.1的pred_bbox， idxs：0~45
-
-                for j in range(idxs[0].shape[0]):  # 46
+                idxs = np.where(scores > 0.1)
+                for j in range(tuple(idxs[0].shape)[0]):
                     bbox = transformed_anchors[idxs[0][j], :]
-                    x1 = int(bbox[0])  # 上一帧检测置信值大于0.1的predict bbox
+                    x1 = int(bbox[0])
                     y1 = int(bbox[1])
                     x2 = int(bbox[2])
                     y2 = int(bbox[3])
-                    # 当前帧检测置信值大于0.1的的predict bbox
                     x3 = int(bbox[4])
                     y3 = int(bbox[5])
                     x4 = int(bbox[6])
                     y4 = int(bbox[7])
-
-                    det_conf = float(scores[idxs[0][j]])  # 检测置信值(前景的置信度得分)
-                    # det_rect：边界框对(相邻帧)
+                    det_conf = float(scores[idxs[0][j]])
                     det_rect = detect_rect()
                     det_rect.curr_frame = idx
                     det_rect.curr_rect = np.array([x1, y1, x2, y2])
                     det_rect.next_rect = np.array([x3, y3, x4, y4])
                     det_rect.conf = det_conf
-
-                    if det_rect.conf > confidence_threshold:  # confidence_threshold：0.4
-                        det_list_all[det_rect.curr_frame - 1].append(det_rect)  # 加载所有视频帧置信值大于0.4的成对pred_bbox
-
-                if i == 0:  # 视频第1帧
-                    for j in range(len(det_list_all[i])):  # j:0~23
-                        det_list_all[i][j].id = j + 1  # 第i帧第j个检测的id
-                        max_id = max(max_id, j + 1)  # 最大id
-                        track = tracklet(det_list_all[i][j])  # 调用tracklet()函数，添加轨迹
+                    print(det_rect)
+                    if det_rect.conf > confidence_threshold:
+                        det_list_all[det_rect.curr_frame - 1].append(det_rect)
+                if i == 0:
+                    for j in range(len(det_list_all[i])):
+                        det_list_all[i][j].id = j + 1
+                        max_id = max(max_id, j + 1)
+                        track = tracklet(det_list_all[i][j])
                         tracklet_all.append(track)
                     continue
-
-                matches, unmatched1, unmatched2 = track_det_match(tracklet_all, det_list_all[i],
-                                                                  IOU_threshold)  # 跟踪-检测匹配(IOU匹配). matches:匹配的跟踪-检测对，unmatched1：未匹配的跟踪，unmatched2：未匹配的检测
-
+                matches, unmatched1, unmatched2 = track_det_match(tracklet_all,
+                    det_list_all[i], IOU_threshold)
                 for j in range(len(matches)):
-                    det_list_all[i][matches[j][1]].id = tracklet_all[matches[j][
-                        0]].id  # 将匹配的跟踪轨迹id赋值给检测结果，det_list_all[i][n]:表示第i帧第n个成对pred_bbox. matches[j][1]:第j个跟踪-检测对中的检测
-                    det_list_all[i][matches[j][1]].id = tracklet_all[matches[j][0]].id
-                    tracklet_all[matches[j][0]].add_rect(det_list_all[i][matches[j][
-                        1]])  # 跟踪轨迹池中添加完成新匹配的检测结果. matches[j][0]:第j个跟踪-检测对中的跟踪. 调用add_rect()函数
-
-                delete_track_list = []  # 删除的轨迹
-                for j in range(len(unmatched1)):  # unmatched1：未匹配的跟踪，例如第16号
-                    tracklet_all[unmatched1[j]].no_match_frame = tracklet_all[unmatched1[
-                        j]].no_match_frame + 1  # no_match_frame：未匹配帧的数量
-                    if tracklet_all[unmatched1[j]].no_match_frame >= retention_threshold:  # retention_threshold：10
+                    det_list_all[i][matches[j][1]].id = tracklet_all[matches
+                        [j][0]].id
+                    det_list_all[i][matches[j][1]].id = tracklet_all[matches
+                        [j][0]].id
+                    tracklet_all[matches[j][0]].add_rect(det_list_all[i][
+                        matches[j][1]])
+                delete_track_list = []
+                for j in range(len(unmatched1)):
+                    tracklet_all[unmatched1[j]].no_match_frame = tracklet_all[
+                        unmatched1[j]].no_match_frame + 1
+                    if tracklet_all[unmatched1[j]
+                        ].no_match_frame >= retention_threshold:
                         delete_track_list.append(unmatched1[j])
-
-                origin_index = set([k for k in range(len(tracklet_all))])  # 创建一个集合
+                origin_index = set([k for k in range(len(tracklet_all))])
                 delete_index = set(delete_track_list)
-                left_index = list(origin_index - delete_index)  # 剩余的跟踪轨迹索引
+                left_index = list(origin_index - delete_index)
                 tracklet_all = [tracklet_all[k] for k in left_index]
-
-                for j in range(len(unmatched2)):  # unmatched2:未匹配的检测
-                    det_list_all[i][unmatched2[j]].id = max_id + 1  # i:帧序-1
+                for j in range(len(unmatched2)):
+                    det_list_all[i][unmatched2[j]].id = max_id + 1
                     max_id = max_id + 1
-                    track = tracklet(det_list_all[i][unmatched2[j]])  # 调用tracklet()函数，将未匹配的检测添加到轨迹池中
-                    tracklet_all.append(track)  #
-
-    # **************visualize tracking result and save evaluate file(可视化跟踪结果并保存评估结果文件)****************
-
-    fout_tracking = open(os.path.join(model_dir, 'results', cur_dataset + '.txt'), 'w')
-
+                    track = tracklet(det_list_all[i][unmatched2[j]])
+                    tracklet_all.append(track)
+            end_time = time.time()
+            print('end_time: ', end_time)
+            frame_time = end_time - start_time
+            frame_times.append(frame_time)
+    Hz = 1 / (sum(frame_times) / len(frame_times))
+    print('HZ: ', Hz)
+    fout_tracking = open(os.path.join(model_dir, 'results', cur_dataset +
+        '.txt'), 'w')
     save_img_dir = os.path.join(model_dir, 'results', cur_dataset)
     if not os.path.exists(save_img_dir):
         os.makedirs(save_img_dir)
-
-    out_video = os.path.join(model_dir, 'results', cur_dataset + '.mp4')  # 跟踪视频序列./trained_model/results/MOT20-01.mp4
-    videoWriter = cv2.VideoWriter(out_video, cv2.VideoWriter_fourcc('m', 'p', '4', 'v'), fps, (img_width,
-                                                                                               img_height))  # cv2.VideoWriter:写视频. cv2.VideoWriter_fourcc('m', 'p', '4', 'v')：相对较旧的MPEG-4编码。如果要限制结果视频的大小，这是一个很好的选择。文件扩展名应为.m4v
-
-    id_dict = {}  # 空字典
-
-    for i in range(img_len):  # 第i+1帧
+    out_video = os.path.join(model_dir, 'results', cur_dataset + '.mp4')
+    videoWriter = cv2.VideoWriter(out_video, cv2.VideoWriter_fourcc('m',
+        'p', '4', 'v'), fps, (img_width, img_height))
+    id_dict = {}
+    for i in range(img_len):
         print('saving: ', i)
-        img = cv2.imread(img_list[i])  # BGR
-
-        for j in range(len(det_list_all[i])):  # 检测结果列表中第i+1帧第j+1个成对pred_bbox
-
-            x1, y1, x2, y2 = det_list_all[i][j].curr_rect.astype(int)  # 检测结果列表中第i+1帧第j+1个成对pred_bbox
+        img = cv2.imread(img_list[i])
+        for j in range(len(det_list_all[i])):
+            x1, y1, x2, y2 = det_list_all[i][j].curr_rect.astype(int)
             trace_id = det_list_all[i][j].id
-
-            id_dict.setdefault(str(trace_id), []).append((int((x1 + x2) / 2),
-                                                          y2))  # 字典设置默认值，例如：{'1':[(718,899),(718,902),(),...],'2':[799,891][],'3':[][]}，主要用于画线
+            id_dict.setdefault(str(trace_id), []).append((int((x1 + x2) / 2
+                ), y2))
             draw_trace_id = str(trace_id)
-            draw_caption(img, (x1, y1, x2, y2), draw_trace_id,
-                         color=color_list[trace_id % len(color_list)])  # 调用draw_caption()函数
-            cv2.rectangle(img, (x1, y1), (x2, y2), color=color_list[trace_id % len(color_list)], thickness=2)  # 画跟踪框
-
-            trace_len = len(id_dict[str(trace_id)])  # 轨迹长度和视频帧数相等
-            trace_len_draw = min(max_draw_len, trace_len)  # max_draw_len:100，轨迹长度不能超过100
-
-            for k in range(trace_len_draw - draw_interval):  # draw_interval：5
-                if k % draw_interval == 0:  # 画轨迹(每间隔5帧画一直线)
-                    draw_point1 = id_dict[str(trace_id)][
-                        trace_len - k - 1]  # 轨迹线的第1个点的位置: 第一个目标(id=1)在第6帧时的位置(715, 907)
-                    draw_point2 = id_dict[str(trace_id)][
-                        trace_len - k - 1 - draw_interval]  # 轨迹线的第二个点的位置: 第一个目标(id=1)在第1帧时的位置(718, 899)
-                    cv2.line(img, draw_point1, draw_point2, color=color_list[trace_id % len(color_list)],
-                             thickness=2)  # 画线，将两个时刻的点连接起来，形成轨迹
-
-            fout_tracking.write(
-                str(i + 1) + ',' + str(trace_id) + ',' + str(x1) + ',' + str(y1) + ',' + str(x2 - x1) + ',' + str(
-                    y2 - y1) + ',-1,-1,-1,-1\n')  # 输出跟踪结果
-
-        cv2.imwrite(os.path.join(save_img_dir, str(i + 1).zfill(6) + '.jpg'), img)  # 保存图像
-        videoWriter.write(img)  # 将图片生成视频
-        cv2.waitKey(0)  # 因为delay=0, 只会显示第一帧视频
-
-    fout_tracking.close()  # 关闭写入结果的txt文件
-    videoWriter.release()  # 关闭摄像头
+            draw_caption(img, (x1, y1, x2, y2), draw_trace_id, color=
+                color_list[trace_id % len(color_list)])
+            cv2.rectangle(img, (x1, y1), (x2, y2), color=color_list[
+                trace_id % len(color_list)], thickness=2)
+            trace_len = len(id_dict[str(trace_id)])
+            trace_len_draw = min(max_draw_len, trace_len)
+            for k in range(trace_len_draw - draw_interval):
+                if k % draw_interval == 0:
+                    draw_point1 = id_dict[str(trace_id)][trace_len - k - 1]
+                    draw_point2 = id_dict[str(trace_id)][trace_len - k - 1 -
+                        draw_interval]
+                    cv2.line(img, draw_point1, draw_point2, color=
+                        color_list[trace_id % len(color_list)], thickness=2)
+            fout_tracking.write(str(i + 1) + ',' + str(trace_id) + ',' +
+                str(x1) + ',' + str(y1) + ',' + str(x2 - x1) + ',' + str(y2 -
+                y1) + ',-1,-1,-1,-1\n')
+        cv2.imwrite(os.path.join(save_img_dir, str(i + 1).zfill(6) + '.jpg'
+            ), img)
+        videoWriter.write(img)
+        cv2.waitKey(0)
+    fout_tracking.close()
+    videoWriter.release()
 
 
 def run_from_train(model_dir, root_path):
     if not os.path.exists(os.path.join(model_dir, 'results')):
         os.makedirs(os.path.join(model_dir, 'results'))
-    retinanet = paddle.load(os.path.join(model_dir, 'model_final.pt'))
+    retinanet = paddle.load(os.path.join(model_dir, 'model_final.pdparams'))
 
     use_gpu = True
 
@@ -316,31 +394,25 @@ def run_from_train(model_dir, root_path):
 
 
 def main(args=None):
-    parser = argparse.ArgumentParser(description='Simple script for testing a CTracker network.')
-
-    parser.add_argument('--dataset_path', default=r'', type=str,
-                        help='Dataset path, location of the images sequence.')
-    parser.add_argument('--model_dir', default='./ctracker/', help='Path to model (.pt) file.')
-
+    parser = argparse.ArgumentParser(description=
+        'Simple script for testing a CTracker network.')
+    parser.add_argument('--dataset_path', default=
+        '', type=str,
+        help='Dataset path, location of the images sequence.')
+    parser.add_argument('--model_dir', default=
+        './ctracker/', help='Path to model (.pdparams) file.')
     parser = parser.parse_args(args)
-
-    if not os.path.exists(os.path.join(parser.model_dir, 'results')):  # 创建results/文件夹路径
+    if not os.path.exists(os.path.join(parser.model_dir, 'results')):
         os.makedirs(os.path.join(parser.model_dir, 'results'))
-
-    retinanet = (paddle.load(os.path.join(parser.model_dir, 'model_final.pt')))
-
+    retinanet = paddle.load(path=os.path.join(parser.model_dir,
+        'model_final.pdparams'))
     use_gpu = True
-
     if use_gpu:
-        retinanet = retinanet.cuda()
-
+        retinanet = retinanet.cuda(blocking=True)
     retinanet.eval()
-
-    # MOT17
-    for seq_num in [1, 3, 6, 7, 8, 12, 14]:
-        run_each_dataset(parser.model_dir, retinanet, parser.dataset_path, 'test', 'MOT17-{:02d}'.format(seq_num))
-    for seq_num in [2, 4, 5, 9, 10, 11, 13]:
-        run_each_dataset(parser.model_dir, retinanet, parser.dataset_path, 'train', 'MOT17-{:02d}'.format(seq_num))
+    for seq_num in [14]:
+        run_each_dataset(parser.model_dir, retinanet, parser.dataset_path,
+            'test', 'MOT17-{:02d}'.format(seq_num))
 
 
 if __name__ == '__main__':
